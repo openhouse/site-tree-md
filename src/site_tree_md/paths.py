@@ -14,9 +14,6 @@ DOCUMENT_SUFFIXES = {
     ".xlsx",
     ".csv",
     ".tsv",
-    ".txt",
-    ".json",
-    ".xml",
     ".zip",
     ".ppt",
     ".pptx",
@@ -24,9 +21,8 @@ DOCUMENT_SUFFIXES = {
     ".epub",
     ".odt",
     ".ods",
-    ".yml",
-    ".yaml",
 }
+TEXT_SUFFIXES = {".txt", ".json", ".xml", ".yml", ".yaml"}
 
 
 def _safe_leaf(segment: str) -> str:
@@ -62,6 +58,11 @@ def binary_path(output_dir: Path, url: str, filename: str) -> Path:
     return url_directory(output_dir, url) / safe_segment(filename)
 
 
+def source_html_path(output_dir: Path, url: str) -> Path:
+    split = urlsplit(url)
+    return url_directory(output_dir, url) / f"{host_slug(split.hostname or 'site')}.source.html"
+
+
 def classify_content(url: str, content_type: str) -> str:
     ctype = (content_type or "").lower()
     if "html" in ctype or "xhtml" in ctype:
@@ -71,6 +72,8 @@ def classify_content(url: str, content_type: str) -> str:
     suffix = Path(urlsplit(url).path).suffix.lower()
     if suffix in DOCUMENT_SUFFIXES:
         return "binary"
+    if suffix in TEXT_SUFFIXES:
+        return "text"
     if suffix in HTML_LIKE_SUFFIXES:
         return "html"
     return "binary"

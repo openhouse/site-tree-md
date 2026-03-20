@@ -39,6 +39,10 @@ class ManifestRecord:
     error: str | None = None
     fetched_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     sha256: str | None = None
+    conversion_strategy: str | None = None
+    extraction_mode: str | None = None
+    extraction_warning: str | None = None
+    source_html_saved_to: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,3 +63,7 @@ class CrawlSummary:
 class SaveResult:
     path: Path
     sha256: str | None
+    conversion_strategy: str | None = None
+    extraction_mode: str | None = None
+    extraction_warning: str | None = None
+    source_html_path: Path | None = None
