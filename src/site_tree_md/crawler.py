@@ -10,6 +10,11 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from site_tree_md.bootstrap import (
+    BrowserRuntimeBootstrapError,
+    BrowserRuntimeStatus,
+    ensure_browser_runtime,
+)
 from site_tree_md.manifest import ManifestWriter
 from site_tree_md.markdown import (
     MarkdownConversionResult,
@@ -92,22 +97,67 @@ class SiteCrawler:
         self.robots = RobotsCache(self.session, timeout, user_agent)
         self.counts = Counter()
         self._renderer: BrowserRenderer | None = None
-        if self.render_mode != "never":
-            self._renderer = BrowserRenderer(
-                RenderOptions(
-                    timeout=self.render_timeout,
-                    wait_until=self.render_wait_until,
-                    wait_selector=self.render_selector,
-                    wait_ms=self.render_wait_ms,
-                    scroll=self.scroll,
-                    scroll_steps=self.scroll_steps,
-                    scroll_step_px=self.scroll_step_px,
-                    scroll_pause_ms=self.scroll_pause_ms,
-                    show_browser=self.show_browser,
-                    ignore_https_errors=self.ignore_https_errors,
-                    user_agent=user_agent,
-                )
-            )
+        self._renderer_options = RenderOptions(
+            timeout=self.render_timeout,
+            wait_until=self.render_wait_until,
+            wait_selector=self.render_selector,
+            wait_ms=self.render_wait_ms,
+            scroll=self.scroll,
+            scroll_steps=self.scroll_steps,
+            scroll_step_px=self.scroll_step_px,
+            scroll_pause_ms=self.scroll_pause_ms,
+            show_browser=self.show_browser,
+            ignore_https_errors=self.ignore_https_errors,
+            user_agent=user_agent,
+        )
+        self._runtime_status = BrowserRuntimeStatus(
+            required=self.render_mode != "never",
+            available=False,
+            auto_installed=False,
+            install_attempted=False,
+            install_succeeded=False,
+        )
+        self._runtime_checked = self.render_mode == "never"
+        self._runtime_disabled = self.render_mode == "never"
+
+    def _get_renderer(self) -> BrowserRenderer:
+        if self._renderer is None:
+            self._renderer = BrowserRenderer(self._renderer_options)
+        return self._renderer
+
+    def _ensure_runtime_once(self) -> BrowserRuntimeStatus:
+        if self._runtime_checked:
+            return self._runtime_status
+        self._runtime_status = ensure_browser_runtime(verbose=self.verbose)
+        self._runtime_checked = True
+        if not self._runtime_status.available and self.render_mode == "auto":
+            self._runtime_disabled = True
+        return self._runtime_status
+
+    def _render_runtime_fields(self) -> dict[str, object]:
+        return {
+            "render_runtime_required": self._runtime_status.required,
+            "render_runtime_available": self._runtime_status.available,
+            "render_runtime_auto_installed": self._runtime_status.auto_installed,
+            "render_runtime_install_attempted": self._runtime_status.install_attempted,
+            "render_runtime_install_succeeded": self._runtime_status.install_succeeded,
+            "render_runtime_warning": self._runtime_status.warning,
+        }
+
+    def _emit_final_summary(self, summary: CrawlSummary) -> None:
+        archived_html = summary.counts_by_kind.get("html", 0)
+        archived_binaries = sum(
+            count for kind, count in summary.counts_by_kind.items() if kind in {"binary", "text"}
+        )
+        warnings = self.counts.get("warning", 0)
+        errors = summary.counts_by_kind.get("error", 0)
+        print(
+            "Crawl summary: "
+            f"html={archived_html}, binaries={archived_binaries}, "
+            f"warnings={warnings}, errors={errors}, "
+            f"browser_runtime_available={summary.render_runtime_available}, "
+            f"browser_runtime_auto_installed={summary.render_runtime_auto_installed}"
+        )
 
     def crawl(self) -> CrawlSummary:
         queue = deque([CrawlTask(self.seed_url, None, 0)])
@@ -180,6 +230,9 @@ class SiteCrawler:
                             ),
                             render_wait_until=self.render_wait_until if kind == "html" else None,
                             render_selector=self.render_selector if kind == "html" else None,
+                            runtime_bootstrap_attempted=save_result.runtime_bootstrap_attempted,
+                            runtime_bootstrap_succeeded=save_result.runtime_bootstrap_succeeded,
+                            runtime_bootstrap_warning=save_result.runtime_bootstrap_warning,
                         )
                     )
                     if self.verbose:
@@ -197,6 +250,30 @@ class SiteCrawler:
                         for next_task in self._extract_links(task, link_html, final_url):
                             if next_task.url not in seen:
                                 queue.append(next_task)
+                except BrowserRuntimeBootstrapError as exc:
+                    self.counts["error"] += 1
+                    self.manifest.append(
+                        ManifestRecord(
+                            requested_url=task.url,
+                            final_url=None,
+                            status_code=None,
+                            content_type=None,
+                            saved_to=None,
+                            page_kind="error",
+                            title=None,
+                            discovered_from=task.discovered_from,
+                            external_hops=task.external_hops,
+                            error=str(exc),
+                            render_mode=self.render_mode,
+                            runtime_bootstrap_attempted=self._runtime_status.install_attempted
+                            or self._runtime_checked,
+                            runtime_bootstrap_succeeded=self._runtime_status.available,
+                            runtime_bootstrap_warning=self._runtime_status.warning,
+                        )
+                    )
+                    if self.verbose:
+                        print(f"fatal: browser runtime bootstrap failed: {exc}")
+                    break
                 except Exception as exc:
                     self.counts["error"] += 1
                     self.manifest.append(
@@ -212,9 +289,13 @@ class SiteCrawler:
                             external_hops=task.external_hops,
                             error=str(exc),
                             render_mode=self.render_mode,
+                            runtime_bootstrap_attempted=self._runtime_status.install_attempted
+                            or self._runtime_checked,
+                            runtime_bootstrap_succeeded=self._runtime_status.available,
+                            runtime_bootstrap_warning=self._runtime_status.warning,
                         )
                     )
-            return CrawlSummary(
+            summary = CrawlSummary(
                 seed_url=self.seed_url,
                 scope_prefix=self.scope.seed_path,
                 external_hop_depth=self.external_depth,
@@ -222,7 +303,10 @@ class SiteCrawler:
                 generated_at=datetime.now(UTC).isoformat(),
                 fetched_pages=sum(self.counts.values()),
                 counts_by_kind=dict(self.counts),
+                **self._render_runtime_fields(),
             )
+            self._emit_final_summary(summary)
+            return summary
         finally:
             if self._renderer is not None:
                 self._renderer.close()
@@ -261,6 +345,9 @@ class SiteCrawler:
             "rendered": save_result.rendered,
             "markdown_source": save_result.markdown_source,
             "page_source_used": save_result.page_source_used,
+            "runtime_bootstrap_attempted": save_result.runtime_bootstrap_attempted,
+            "runtime_bootstrap_succeeded": save_result.runtime_bootstrap_succeeded,
+            "runtime_bootstrap_warning": save_result.runtime_bootstrap_warning,
             "source_server_html_saved_to": (
                 str(save_result.server_html_path.relative_to(self.output_dir))
                 if save_result.server_html_path
@@ -351,16 +438,47 @@ class SiteCrawler:
                 server_html, server_conversion
             )
             render_result: RenderResult | None = None
-            if render_attempted:
-                if self._renderer is None:
-                    raise RuntimeError(
-                        "Browser rendering requested but renderer is unavailable. Install with "
-                        "`python -m pip install -e .[render]` and run "
-                        "`python -m playwright install chromium`."
+            runtime_status: BrowserRuntimeStatus | None = None
+            if render_attempted and not self._runtime_disabled:
+                runtime_status = self._ensure_runtime_once()
+                if runtime_status.available:
+                    render_result = self._get_renderer().render_page(final_url)
+                    if not render_result.render_warning:
+                        render_result.render_warning = render_reason
+                elif self.render_mode == "always":
+                    raise BrowserRuntimeBootstrapError(
+                        runtime_status.warning or "browser runtime bootstrap failed"
                     )
-                render_result = self._renderer.render_page(final_url)
-                if not render_result.render_warning:
-                    render_result.render_warning = render_reason
+                else:
+                    render_result = RenderResult(
+                        requested_url=final_url,
+                        final_url=final_url,
+                        html=None,
+                        title=None,
+                        status_code=response.status_code,
+                        content_type=response.headers.get("content-type"),
+                        render_succeeded=False,
+                        render_warning=(
+                            runtime_status.warning
+                            or "browser runtime bootstrap failed; using server HTML fallback"
+                        ),
+                    )
+            elif render_attempted and self._runtime_disabled:
+                runtime_status = self._runtime_status
+                render_result = RenderResult(
+                    requested_url=final_url,
+                    final_url=final_url,
+                    html=None,
+                    title=None,
+                    status_code=response.status_code,
+                    content_type=response.headers.get("content-type"),
+                    render_succeeded=False,
+                    render_warning=(
+                        runtime_status.warning
+                        or "browser runtime unavailable earlier in crawl; "
+                        "using server HTML fallback"
+                    ),
+                )
             selected_html, conversion, markdown_source, rendered_used, render_warning = (
                 self._select_html_source(
                     server_html,
@@ -385,6 +503,11 @@ class SiteCrawler:
                 rendered=rendered_used,
                 markdown_source=markdown_source,
                 page_source_used=markdown_source,
+                runtime_bootstrap_attempted=bool(
+                    runtime_status and (runtime_status.install_attempted or self._runtime_checked)
+                ),
+                runtime_bootstrap_succeeded=bool(runtime_status and runtime_status.available),
+                runtime_bootstrap_warning=runtime_status.warning if runtime_status else None,
             )
             if self.save_source_html or conversion.extraction_warning or render_attempted:
                 save_result.server_html_path = self._save_html(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from site_tree_md.bootstrap import require_browser_runtime
+
 
 @dataclass(slots=True)
 class RenderResult:
@@ -48,14 +50,9 @@ class BrowserRenderer:
     def start(self) -> None:
         if self._context is not None:
             return
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as exc:  # pragma: no cover - exercised via CLI/runtime failure path
-            raise RuntimeError(
-                "Playwright is required for browser rendering. Install with "
-                "`python -m pip install -e .[render]` and then run "
-                "`python -m playwright install chromium`."
-            ) from exc
+        require_browser_runtime(verbose=False)
+        from playwright.sync_api import sync_playwright
+
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=not self.options.show_browser)
         self._context = self._browser.new_context(

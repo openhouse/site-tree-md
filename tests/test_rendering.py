@@ -90,6 +90,12 @@ def test_rendered_html_selected_for_markdown(monkeypatch, tmp_path) -> None:
             )
 
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
+        monkeypatch.setattr(
+            "site_tree_md.crawler.ensure_browser_runtime",
+            lambda verbose=False: __import__(
+                "site_tree_md.bootstrap", fromlist=["BrowserRuntimeStatus"]
+            ).BrowserRuntimeStatus(True, True, False, False, True),
+        )
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
             tmp_path,
@@ -138,6 +144,12 @@ def test_render_failure_keeps_stub(monkeypatch, tmp_path) -> None:
             )
 
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
+        monkeypatch.setattr(
+            "site_tree_md.crawler.ensure_browser_runtime",
+            lambda verbose=False: __import__(
+                "site_tree_md.bootstrap", fromlist=["BrowserRuntimeStatus"]
+            ).BrowserRuntimeStatus(True, True, False, False, True),
+        )
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
             tmp_path,
@@ -187,6 +199,12 @@ def test_render_sidecars_and_rendered_link_discovery(monkeypatch, tmp_path) -> N
             )
 
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
+        monkeypatch.setattr(
+            "site_tree_md.crawler.ensure_browser_runtime",
+            lambda verbose=False: __import__(
+                "site_tree_md.bootstrap", fromlist=["BrowserRuntimeStatus"]
+            ).BrowserRuntimeStatus(True, True, False, False, True),
+        )
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
             tmp_path,

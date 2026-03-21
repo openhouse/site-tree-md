@@ -101,4 +101,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = crawler.crawl()
     crawler.manifest.write_summary(summary)
+    success_count = sum(summary.counts_by_kind.get(kind, 0) for kind in ("html", "text", "binary"))
+    error_count = summary.counts_by_kind.get("error", 0)
+    if not summary.render_runtime_available and render_mode == "always":
+        return 1
+    if success_count == 0:
+        return 1
+    if error_count > 0 and args.verbose:
+        print(
+            "warning: crawl completed with "
+            f"{error_count} errors and {success_count} archived artifacts"
+        )
     return 0

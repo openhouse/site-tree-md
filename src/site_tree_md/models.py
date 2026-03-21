@@ -51,6 +51,9 @@ class ManifestRecord:
     rendered: bool = False
     markdown_source: str | None = None
     page_source_used: str | None = None
+    runtime_bootstrap_attempted: bool = False
+    runtime_bootstrap_succeeded: bool = False
+    runtime_bootstrap_warning: str | None = None
     source_server_html_saved_to: str | None = None
     source_rendered_html_saved_to: str | None = None
     render_wait_until: str | None = None
@@ -69,6 +72,12 @@ class CrawlSummary:
     generated_at: str
     fetched_pages: int
     counts_by_kind: dict[str, int]
+    render_runtime_required: bool = False
+    render_runtime_available: bool = False
+    render_runtime_auto_installed: bool = False
+    render_runtime_install_attempted: bool = False
+    render_runtime_install_succeeded: bool = False
+    render_runtime_warning: str | None = None
 
 
 @dataclass(slots=True)
@@ -88,3 +97,6 @@ class SaveResult:
     rendered: bool = False
     markdown_source: str | None = None
     page_source_used: str | None = None
+    runtime_bootstrap_attempted: bool = False
+    runtime_bootstrap_succeeded: bool = False
+    runtime_bootstrap_warning: str | None = None
