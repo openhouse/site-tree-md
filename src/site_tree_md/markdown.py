@@ -15,6 +15,8 @@ SUBSTANTIAL_VISIBLE_TEXT_THRESHOLD = 300
 THIN_RATIO_DENOMINATOR = 5
 MEANINGFUL_BLOCK_THRESHOLD = 2
 EMBEDDED_TEXT_MIN_CHARS = 120
+SPARSE_VISIBLE_TEXT_THRESHOLD = 60
+SPARSE_ROOT_IDS = {"root", "app", "__next", "__nuxt", "app-root"}
 IGNORED_EMBEDDED_KEYS = {
     "id",
     "_id",
@@ -30,6 +32,14 @@ IGNORED_EMBEDDED_KEYS = {
     "type",
     "__typename",
 }
+
+
+@dataclass(slots=True)
+class PageMetadata:
+    title: str | None
+    meta_description: str | None = None
+    og_description: str | None = None
+    canonical_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -99,12 +109,40 @@ def _meaningful_lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def extract_title(html: str) -> str | None:
+def _meta_content(
+    soup: BeautifulSoup, *, name: str | None = None, prop: str | None = None
+) -> str | None:
+    attrs = {}
+    if name:
+        attrs["name"] = name
+    if prop:
+        attrs["property"] = prop
+    node = soup.find("meta", attrs=attrs)
+    if node and node.get("content"):
+        return node["content"].strip() or None
+    return None
+
+
+def extract_page_metadata(html: str) -> PageMetadata:
     soup = BeautifulSoup(html, "html.parser")
+    title = None
     if soup.title and soup.title.string:
-        return soup.title.string.strip()
-    h1 = soup.find("h1")
-    return h1.get_text(" ", strip=True) if h1 else None
+        title = soup.title.string.strip() or None
+    if title is None:
+        h1 = soup.find("h1")
+        title = h1.get_text(" ", strip=True) if h1 else None
+    canonical = soup.find("link", rel=lambda value: value and "canonical" in value)
+    canonical_url = canonical.get("href", "").strip() or None if canonical else None
+    return PageMetadata(
+        title=title,
+        meta_description=_meta_content(soup, name="description"),
+        og_description=_meta_content(soup, prop="og:description"),
+        canonical_url=canonical_url,
+    )
+
+
+def extract_title(html: str) -> str | None:
+    return extract_page_metadata(html).title
 
 
 def absolutize_links(html: str, page_url: str) -> str:
@@ -316,9 +354,62 @@ def is_thin_markdown(markdown: str, title: str | None, visible_len: int) -> bool
     )
 
 
-def html_to_markdown(html: str, url: str, mode: str = "full-page") -> MarkdownConversionResult:
-    title = extract_title(html)
+def is_sparse_shell_html(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+    body = soup.body or soup
     visible_len = visible_text_length(html)
+    root_like = False
+    meaningful_children = 0
+    for child in body.find_all(recursive=False):
+        if not isinstance(child, Tag):
+            continue
+        child_text = _normalize_whitespace(child.get_text(" ", strip=True))
+        if child.name in {"script", "style", "noscript", "template"}:
+            continue
+        if (
+            child.name == "div"
+            and (child.get("id") or "").lower() in SPARSE_ROOT_IDS
+            and not child_text
+        ):
+            root_like = True
+            continue
+        if child_text:
+            meaningful_children += 1
+        elif child.name not in {"script", "style", "noscript", "template"}:
+            meaningful_children += 1
+    script_markers = any(
+        script.get("src") or "import(" in script.get_text(" ", strip=True)
+        for script in soup.find_all("script")
+    )
+    embedded = extract_embedded_app_text(html)
+    return bool(
+        visible_len <= SPARSE_VISIBLE_TEXT_THRESHOLD
+        and root_like
+        and meaningful_children <= 1
+        and script_markers
+        and not embedded
+    )
+
+
+def _failure_stub(url: str, metadata: PageMetadata, warning: str) -> str:
+    lines = [f"> Warning: extracted HTML for {url} remains too sparse for rich markdown."]
+    lines.append("")
+    lines.append(f"- Title: {metadata.title or 'Untitled page'}")
+    if metadata.meta_description:
+        lines.append(f"- Meta description: {metadata.meta_description}")
+    if metadata.og_description and metadata.og_description != metadata.meta_description:
+        lines.append(f"- OG description: {metadata.og_description}")
+    if metadata.canonical_url:
+        lines.append(f"- Canonical URL: {metadata.canonical_url}")
+    lines.append(f"- Warning: {warning}")
+    return "\n".join(lines)
+
+
+def html_to_markdown(html: str, url: str, mode: str = "full-page") -> MarkdownConversionResult:
+    metadata = extract_page_metadata(html)
+    title = metadata.title
+    visible_len = visible_text_length(html)
+    shell_detected = is_sparse_shell_html(html)
 
     if mode == "main-content":
         markdown = main_content_html_to_markdown(html, url)
@@ -339,12 +430,11 @@ def html_to_markdown(html: str, url: str, mode: str = "full-page") -> MarkdownCo
                 conversion_strategy="text_fallback",
                 extraction_warning=warning,
             )
-        fallback_text = fallback or (title or "Untitled page")
-        final = f"> Warning: extracted markdown was too thin for {url}.\n\n{fallback_text}"
+        final_warning = "client_rendered_shell_detected" if shell_detected else warning
         return MarkdownConversionResult(
-            markdown=final,
+            markdown=_failure_stub(url, metadata, final_warning),
             conversion_strategy="failure_stub",
-            extraction_warning=warning,
+            extraction_warning=final_warning,
         )
 
     full_page = full_page_html_to_markdown(html, url)
@@ -373,13 +463,13 @@ def html_to_markdown(html: str, url: str, mode: str = "full-page") -> MarkdownCo
             extraction_warning="thin_full_page_detected",
         )
 
-    warning = "fetched_html_too_sparse_for_markdown"
-    stub = (
-        f"> Warning: fetched HTML for {url} appears too sparse to build rich markdown.\n\n"
-        f"Captured title: {title or 'Untitled page'}"
+    warning = (
+        "client_rendered_shell_detected"
+        if shell_detected
+        else "fetched_html_too_sparse_for_markdown"
     )
     return MarkdownConversionResult(
-        markdown=stub,
+        markdown=_failure_stub(url, metadata, warning),
         conversion_strategy="failure_stub",
         extraction_warning=warning,
     )
