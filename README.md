@@ -10,6 +10,9 @@
 - Thin-output guard rejects title-only / overly sparse markdown and falls back to broader extraction.
 - Browser-rendered HTML support for client-rendered app shells with `--render-mode never|auto|always`; `auto` is the default.
 - Sparse-shell pages can fall back from server HTML to a rendered Chromium DOM, with rendered DOM also used for link discovery.
+- Browser runtime bootstrap is automatic on first render attempt, including Playwright package repair and Chromium install when needed.
+- In `--render-mode auto`, browser bootstrap failures degrade to server HTML plus warning provenance instead of page-level hard errors.
+- In `--render-mode always`, browser bootstrap is attempted once and the crawl fails fast if the runtime still cannot be provisioned.
 - Server and rendered HTML provenance sidecars are preserved as `*.source.server.html` and `*.source.rendered.html` when rendering is attempted or debugging is requested.
 - Optional `--main-content` mode keeps the previous article-style extraction behavior as an opt-in.
 - Direct document/file links saved as raw files.
@@ -20,20 +23,36 @@
 
 ### Development / editable install
 
+A normal editable install is enough for the default command path.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .[dev]
 ```
 
-### With browser rendering support
+You can also install the runtime without developer tooling:
+
+```bash
+python -m pip install -e .
+```
+
+### Browser runtime behavior
+
+- The Python `playwright` package is part of the default install path.
+- Chromium is bootstrapped automatically the first time a page actually needs browser rendering.
+- The first SPA-heavy run may take longer because `site-tree-md` may run `python -m playwright install chromium` automatically.
+- If browser bootstrap fails in `--render-mode auto`, the crawl keeps the server HTML result and records a render warning.
+- If browser bootstrap fails in `--render-mode always`, the crawl stops once with a clear fatal error.
+
+### Optional pre-provisioning
+
+If you want to preinstall browser support ahead of time, the extras remain available as aliases:
 
 ```bash
 python -m pip install -e .[dev,render]
 python -m playwright install chromium
 ```
-
-The `browser` extra is also available as an alias:
 
 ```bash
 python -m pip install -e .[dev,browser]
@@ -43,8 +62,8 @@ python -m playwright install chromium
 ### With uv
 
 ```bash
-uv sync --extra dev --extra render
-uv run python -m playwright install chromium
+uv sync --extra dev
+uv run archive_site.py https://smallbizunited.com/
 ```
 
 ## Quickstart
@@ -74,8 +93,8 @@ By default, HTML responses are archived as full-page Markdown translations of fe
 ### Render modes
 
 - `--render-mode never`: only use `requests`; never launch a browser.
-- `--render-mode auto` *(default)*: fetch server HTML first, then render with Playwright only when the server HTML looks like a sparse shell or conversion would otherwise collapse into a warning stub.
-- `--render-mode always`: render every HTML page in Chromium and prefer the rendered DOM for Markdown conversion.
+- `--render-mode auto` *(default)*: fetch server HTML first, then render with Playwright only when the server HTML looks like a sparse shell or conversion would otherwise collapse into a warning stub. If bootstrap fails here, the crawler keeps server output and records a warning.
+- `--render-mode always`: render every HTML page in Chromium and prefer the rendered DOM for Markdown conversion. If the browser runtime still cannot be provisioned, the crawl fails once and exits non-zero.
 
 `--render-js` remains available as a backward-compatible opt-in alias for browser fallback behavior.
 
@@ -85,10 +104,11 @@ For rendered pages, the crawler:
 
 1. Fetches server HTML with `requests`.
 2. Detects sparse shells using low visible text, root-mount containers such as `#root` / `#app`, app-bundle markers, and failed Markdown conversion.
-3. Reuses a Playwright Chromium browser/context across the crawl.
-4. Navigates with `page.goto(...)`, waits for `domcontentloaded`, then the configured `--render-wait-until` state, then an additional settle delay via `--render-wait-ms`.
-5. Optionally waits for `--render-selector` and optionally auto-scrolls via `--scroll` and related flags.
-6. Converts the rendered DOM to Markdown and extracts links from the rendered DOM as well.
+3. Bootstraps Playwright/Chromium once per crawl when rendering is first required.
+4. Reuses a Playwright Chromium browser/context across the crawl.
+5. Navigates with `page.goto(...)`, waits for `domcontentloaded`, then the configured `--render-wait-until` state, then an additional settle delay via `--render-wait-ms`.
+6. Optionally waits for `--render-selector` and optionally auto-scrolls via `--scroll` and related flags.
+7. Converts the rendered DOM to Markdown and extracts links from the rendered DOM as well.
 
 If both server HTML and rendered HTML are still too sparse, the crawler writes a warning stub with available metadata instead of pretending success.
 
@@ -141,7 +161,9 @@ Each run also writes:
 - `web/_crawl_failures.jsonl`
 - `web/_crawl_summary.json`
 
-Manifest records for HTML pages include provenance and diagnostics such as `render_mode`, `render_attempted`, `render_succeeded`, `render_warning`, `render_source`, `markdown_source`, `page_source_used`, `source_server_html_saved_to`, `source_rendered_html_saved_to`, `conversion_strategy`, `extraction_mode`, and `extraction_warning`.
+Manifest records for HTML pages include provenance and diagnostics such as `render_mode`, `render_attempted`, `render_succeeded`, `render_warning`, `render_source`, `markdown_source`, `page_source_used`, `runtime_bootstrap_attempted`, `runtime_bootstrap_succeeded`, `runtime_bootstrap_warning`, `source_server_html_saved_to`, `source_rendered_html_saved_to`, `conversion_strategy`, `extraction_mode`, and `extraction_warning`.
+
+Summary records include `archived_html_pages`, `archived_binary_pages`, `warnings`, `errors`, `render_runtime_available`, `render_runtime_auto_installed`, `render_runtime_install_attempted`, `render_runtime_install_succeeded`, and `render_runtime_warning`.
 
 ## CLI options
 
@@ -162,7 +184,7 @@ site-tree-md URL [--external-depth N] [--output-dir DIR] [--max-pages N]
 
 ## Limitations
 
-- Browser rendering is optional and requires Playwright plus a local Chromium install.
+- Browser bootstrap still depends on the current environment permitting package installs and Playwright browser downloads.
 - v1 remains single-threaded.
 - Internal scope defaults to exact-host root-scope crawling; related-domain crawling is intentionally conservative.
 - The crawler focuses on pages and linked documents, not full asset mirroring.

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from site_tree_md.crawler import SiteCrawler
+from site_tree_md.models import CrawlSummary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +70,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_summary(summary: CrawlSummary) -> None:
+    stream = sys.stderr if summary.errors or summary.warnings or summary.fatal_error else sys.stdout
+    print(
+        "Crawl summary: "
+        f"archived_html_pages={summary.archived_html_pages}, "
+        f"archived_binaries={summary.archived_binary_pages}, "
+        f"warnings={summary.warnings}, "
+        f"errors={summary.errors}, "
+        f"render_runtime_available={summary.render_runtime_available}, "
+        f"render_runtime_auto_installed={summary.render_runtime_auto_installed}",
+        file=stream,
+    )
+    if summary.render_runtime_warning:
+        print(f"Render runtime warning: {summary.render_runtime_warning}", file=stream)
+    if summary.fatal_error:
+        print(f"Fatal error: {summary.fatal_error}", file=sys.stderr)
+
+
+def _exit_code_for_summary(summary: CrawlSummary) -> int:
+    saved_artifacts = summary.archived_html_pages + summary.archived_binary_pages
+    if summary.fatal_error:
+        return 1
+    if saved_artifacts == 0:
+        return 1
+    if summary.errors and saved_artifacts == 0:
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -101,4 +132,5 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = crawler.crawl()
     crawler.manifest.write_summary(summary)
-    return 0
+    _print_summary(summary)
+    return _exit_code_for_summary(summary)
