@@ -23,20 +23,26 @@
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install -e .
+```
+
+For development tools, add the `dev` extra:
+
+```bash
 python -m pip install -e .[dev]
 ```
 
-### With browser rendering support
+Browser rendering now self-bootstraps on the first render attempt. The Python package ships in the default install, and the CLI will automatically run `python -m playwright install chromium` when Chromium is missing. The first SPA-heavy crawl may therefore take a little longer.
+
+If you prefer to pre-provision the browser runtime ahead of time, the optional aliases still work:
 
 ```bash
-python -m pip install -e .[dev,render]
+python -m pip install -e .[render]
 python -m playwright install chromium
 ```
 
-The `browser` extra is also available as an alias:
-
 ```bash
-python -m pip install -e .[dev,browser]
+python -m pip install -e .[browser]
 python -m playwright install chromium
 ```
 
@@ -80,6 +86,8 @@ By default, HTML responses are archived as full-page Markdown translations of fe
 `--render-js` remains available as a backward-compatible opt-in alias for browser fallback behavior.
 
 ### Render setup and behavior
+
+In the default `auto` mode, the crawler only touches the browser stack when server HTML looks too sparse. At that point it bootstraps Chromium automatically once per crawl. If bootstrap fails in `auto` mode, the crawl records a render warning, keeps the server HTML / stub fallback, and continues. If bootstrap fails in `always` mode, the crawl fails once clearly and exits non-zero.
 
 For rendered pages, the crawler:
 
@@ -162,7 +170,7 @@ site-tree-md URL [--external-depth N] [--output-dir DIR] [--max-pages N]
 
 ## Limitations
 
-- Browser rendering is optional and requires Playwright plus a local Chromium install.
+- Browser rendering is available from the default install; Chromium is auto-installed on first render use, with manual pre-install still available as troubleshooting or pre-provisioning.
 - v1 remains single-threaded.
 - Internal scope defaults to exact-host root-scope crawling; related-domain crawling is intentionally conservative.
 - The crawler focuses on pages and linked documents, not full asset mirroring.
