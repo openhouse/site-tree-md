@@ -43,6 +43,18 @@ class ManifestRecord:
     extraction_mode: str | None = None
     extraction_warning: str | None = None
     source_html_saved_to: str | None = None
+    render_mode: str | None = None
+    render_attempted: bool = False
+    render_succeeded: bool = False
+    render_warning: str | None = None
+    render_source: str | None = None
+    rendered: bool = False
+    markdown_source: str | None = None
+    page_source_used: str | None = None
+    source_server_html_saved_to: str | None = None
+    source_rendered_html_saved_to: str | None = None
+    render_wait_until: str | None = None
+    render_selector: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,3 +79,12 @@ class SaveResult:
     extraction_mode: str | None = None
     extraction_warning: str | None = None
     source_html_path: Path | None = None
+    server_html_path: Path | None = None
+    rendered_html_path: Path | None = None
+    render_attempted: bool = False
+    render_succeeded: bool = False
+    render_warning: str | None = None
+    render_source: str | None = None
+    rendered: bool = False
+    markdown_source: str | None = None
+    page_source_used: str | None = None

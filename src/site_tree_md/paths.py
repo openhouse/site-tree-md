@@ -58,9 +58,21 @@ def binary_path(output_dir: Path, url: str, filename: str) -> Path:
     return url_directory(output_dir, url) / safe_segment(filename)
 
 
-def source_html_path(output_dir: Path, url: str) -> Path:
+def _html_sidecar_path(output_dir: Path, url: str, suffix: str) -> Path:
     split = urlsplit(url)
-    return url_directory(output_dir, url) / f"{host_slug(split.hostname or 'site')}.source.html"
+    return url_directory(output_dir, url) / f"{host_slug(split.hostname or 'site')}.{suffix}.html"
+
+
+def source_html_path(output_dir: Path, url: str) -> Path:
+    return source_server_html_path(output_dir, url)
+
+
+def source_server_html_path(output_dir: Path, url: str) -> Path:
+    return _html_sidecar_path(output_dir, url, "source.server")
+
+
+def source_rendered_html_path(output_dir: Path, url: str) -> Path:
+    return _html_sidecar_path(output_dir, url, "source.rendered")
 
 
 def classify_content(url: str, content_type: str) -> str:
