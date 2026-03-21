@@ -16,6 +16,7 @@ dependencies = [
   "markdownify>=0.13.1",
   "trafilatura>=1.9.0",
   "tldextract>=5.1.2",
+  "playwright>=1.52",
 ]
 
 [project.optional-dependencies]

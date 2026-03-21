@@ -6,8 +6,10 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from site_tree_md.bootstrap import reset_runtime_bootstrap_state
 from site_tree_md.crawler import SiteCrawler
 from site_tree_md.markdown import html_to_markdown, is_sparse_shell_html
+from site_tree_md.bootstrap import RuntimeBootstrapStatus
 from site_tree_md.render import RenderResult
 
 SPA_SHELL = (
@@ -60,6 +62,22 @@ def serve(handler, directory: Path | None = None):
     return server, thread
 
 
+def setup_function() -> None:
+    reset_runtime_bootstrap_state()
+
+
+
+
+def mark_runtime_available(self, *, fatal_on_failure: bool):
+    from site_tree_md.render import BrowserRenderer, RenderOptions
+
+    if self._renderer is None:
+        self._renderer = BrowserRenderer(RenderOptions())
+    self._render_runtime_checked = True
+    self._render_runtime_status = RuntimeBootstrapStatus(available=True, attempted=True)
+    return self._render_runtime_status
+
+
 def test_sparse_shell_detection() -> None:
     html = "<html><body><div id='root'></div><script src='/app.js'></script></body></html>"
     assert is_sparse_shell_html(html)
@@ -73,7 +91,9 @@ def test_rendered_html_selected_for_markdown(monkeypatch, tmp_path) -> None:
     hydrated_html = (
         "<html><head><title>Shared</title></head><body>"
         "<main><h1>Hydrated route</h1>"
-        "<p>Rendered content for local businesses appears here.</p></main>"
+        "<p>Rendered content for local businesses appears here.</p>"
+        "<p>Additional rendered copy gives the converter plenty of body text to keep.</p>"
+        "<p>Neighborhood commerce stories continue in the hydrated DOM.</p></main>"
         "</body></html>"
     )
     try:
@@ -89,6 +109,8 @@ def test_rendered_html_selected_for_markdown(monkeypatch, tmp_path) -> None:
                 render_succeeded=True,
             )
 
+        monkeypatch.setattr("site_tree_md.render.BrowserRenderer.start", lambda self: None)
+        monkeypatch.setattr(SiteCrawler, "_ensure_renderer_ready", mark_runtime_available)
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
@@ -137,6 +159,8 @@ def test_render_failure_keeps_stub(monkeypatch, tmp_path) -> None:
                 render_warning="timeout",
             )
 
+        monkeypatch.setattr("site_tree_md.render.BrowserRenderer.start", lambda self: None)
+        monkeypatch.setattr(SiteCrawler, "_ensure_renderer_ready", mark_runtime_available)
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
@@ -186,6 +210,8 @@ def test_render_sidecars_and_rendered_link_discovery(monkeypatch, tmp_path) -> N
                 render_succeeded=True,
             )
 
+        monkeypatch.setattr("site_tree_md.render.BrowserRenderer.start", lambda self: None)
+        monkeypatch.setattr(SiteCrawler, "_ensure_renderer_ready", mark_runtime_available)
         monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
         crawler = SiteCrawler(
             f"http://127.0.0.1:{server.server_port}/",
