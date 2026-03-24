@@ -78,6 +78,11 @@ def _print_summary(summary: CrawlSummary) -> None:
         f"archived_binaries={summary.archived_binary_pages}, "
         f"warnings={summary.warnings}, "
         f"errors={summary.errors}, "
+        f"pages_render_attempted={summary.pages_render_attempted}, "
+        f"pages_render_succeeded={summary.pages_render_succeeded}, "
+        f"pages_render_failed={summary.pages_render_failed}, "
+        f"pages_fell_back_to_server_html={summary.pages_fell_back_to_server_html}, "
+        f"pages_written_as_failure_stub={summary.pages_written_as_failure_stub}, "
         f"render_runtime_available={summary.render_runtime_available}, "
         f"render_runtime_auto_installed={summary.render_runtime_auto_installed}",
         file=stream,

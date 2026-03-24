@@ -106,16 +106,37 @@ def _import_playwright() -> tuple[object, str | None]:
     return sync_api, version
 
 
-def _probe_chromium(sync_api_module: object) -> None:
-    sync_playwright = getattr(sync_api_module, "sync_playwright")
-    playwright = sync_playwright().start()
-    browser = None
-    try:
-        browser = playwright.chromium.launch(headless=True)
-    finally:
-        if browser is not None:
-            browser.close()
-        playwright.stop()
+def _playwright_probe_code() -> str:
+    return (
+        "from playwright.sync_api import sync_playwright\n"
+        "playwright = sync_playwright().start()\n"
+        "browser = None\n"
+        "try:\n"
+        "    browser = playwright.chromium.launch(headless=True)\n"
+        "finally:\n"
+        "    if browser is not None:\n"
+        "        browser.close()\n"
+        "    playwright.stop()\n"
+    )
+
+
+def _probe_chromium_subprocess(*, verbose: bool) -> None:
+    _run([sys.executable, "-c", _playwright_probe_code()], verbose=verbose)
+
+
+def _looks_like_missing_browser(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "executable doesn't exist",
+            "executable doesn't exist at",
+            "please run the following command",
+            "playwright install",
+            "browser has been closed",
+            "failed to launch browser",
+        )
+    )
 
 
 def _load_marker() -> dict[str, str] | None:
@@ -187,32 +208,30 @@ def ensure_browser_runtime(*, verbose: bool = False) -> RuntimeBootstrapStatus:
         status.playwright_version = version
 
         try:
-            _probe_chromium(sync_api)
-            if status.package_installed and status.auto_installed:
-                status.attempted = True
-                status.install_attempted = True
-                if verbose:
-                    print("Chromium install will be refreshed after Playwright package install...")
-                _run([sys.executable, "-m", "playwright", "install", "chromium"], verbose=verbose)
-            _probe_chromium(sync_api)
+            _probe_chromium_subprocess(verbose=verbose)
             status.available = True
             status.chromium_installed = True
             status.install_succeeded = status.install_attempted
-            if status.install_succeeded:
+            if status.install_attempted:
                 _write_marker(version)
-                if verbose:
-                    print("Browser runtime bootstrap succeeded.")
             _BOOTSTRAP_STATUS = status
             return status
         except Exception as exc:
             status.attempted = True
+            error_text = str(exc)
+            if not _looks_like_missing_browser(error_text):
+                status.warning = f"playwright bootstrap failed: {exc}"
+                _BOOTSTRAP_STATUS = status
+                if verbose:
+                    print(f"Browser runtime bootstrap failed: {status.warning}")
+                raise BrowserRuntimeBootstrapError(status.warning) from exc
             status.auto_installed = True
             status.install_attempted = True
             if verbose:
                 print("Chromium missing or not launchable; installing Chromium for Playwright...")
             try:
                 _run([sys.executable, "-m", "playwright", "install", "chromium"], verbose=verbose)
-                _probe_chromium(sync_api)
+                _probe_chromium_subprocess(verbose=verbose)
                 status.available = True
                 status.chromium_installed = True
                 status.install_succeeded = True

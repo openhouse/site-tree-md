@@ -77,6 +77,11 @@ def test_auto_mode_bootstrap_failure_degrades_gracefully(monkeypatch, tmp_path) 
         assert attempts["count"] == 1
         assert summary.archived_html_pages == 1
         assert summary.errors == 0
+        assert summary.warnings == 1
+        assert summary.pages_render_attempted == 1
+        assert summary.pages_render_failed == 1
+        assert summary.pages_fell_back_to_server_html == 1
+        assert summary.pages_written_as_failure_stub == 1
         assert summary.render_runtime_available is False
         record = json.loads((tmp_path / "web" / "_crawl_manifest.jsonl").read_text().splitlines()[0])
         assert record["page_kind"] == "html"
@@ -172,6 +177,61 @@ def test_bootstrap_only_once_for_multiple_pages(monkeypatch, tmp_path) -> None:
 
         assert summary.archived_html_pages >= 2
         assert attempts["count"] == 1
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_summary_matches_manifest_warning_counts(monkeypatch, tmp_path, capsys) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(SPA_SHELL, encoding="utf-8")
+    server, thread = serve(site)
+    try:
+        def fake_ensure(self, *, fatal_on_failure: bool):
+            self._render_runtime_checked = True
+            self._render_runtime_status = RuntimeBootstrapStatus(
+                available=False,
+                attempted=True,
+                auto_installed=True,
+                install_attempted=True,
+                install_succeeded=False,
+                warning="playwright bootstrap failed: chromium install failed",
+            )
+            self._rendering_disabled = True
+            return self._render_runtime_status
+
+        monkeypatch.setattr(SiteCrawler, "_ensure_renderer_ready", fake_ensure)
+        exit_code = main(
+            [
+                f"http://127.0.0.1:{server.server_port}/",
+                "--output-dir",
+                str(tmp_path),
+                "--no-sitemap-seed",
+                "--ignore-robots",
+                "--render-mode",
+                "auto",
+            ]
+        )
+        assert exit_code == 0
+        stderr = capsys.readouterr().err
+        assert "warnings=1" in stderr
+
+        summary = json.loads((tmp_path / "web" / "_crawl_summary.json").read_text(encoding="utf-8"))
+        manifest_records = [
+            json.loads(line)
+            for line in (tmp_path / "web" / "_crawl_manifest.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        manifest_warning_count = sum(
+            1
+            for record in manifest_records
+            if record.get("render_warning")
+            or record.get("extraction_warning")
+            or record.get("runtime_bootstrap_warning")
+        )
+        assert summary["warnings"] == 1 == manifest_warning_count
+        assert summary["pages_render_attempted"] == 1
+        assert summary["pages_render_failed"] == 1
     finally:
         server.shutdown()
         thread.join(timeout=2)

@@ -72,6 +72,7 @@ uv run archive_site.py https://smallbizunited.com/
 site-tree-md https://smallbizunited.com/
 python -m site_tree_md https://smallbizunited.com/
 uv run archive_site.py https://smallbizunited.com/
+bash scripts/acceptance_render.sh
 ```
 
 ## Examples
@@ -84,7 +85,10 @@ uv run archive_site.py https://smallbizunited.com/ --max-pages 2000 --delay 0.5
 uv run archive_site.py https://smallbizunited.com/ --main-content
 uv run archive_site.py https://smallbizunited.com/ --save-source-html
 uv run archive_site.py https://smallbizunited.com/ --render-mode auto --save-rendered-html
+bash scripts/acceptance_render.sh ./trial-run
 ```
+
+Use `scripts/acceptance_render.sh` as the canonical acceptance command for rendered-crawl validation. It intentionally runs the current checkout, so there is no stale branch pinning to drift from `feature/render`.
 
 ## HTML conversion behavior
 
@@ -104,7 +108,7 @@ For rendered pages, the crawler:
 
 1. Fetches server HTML with `requests`.
 2. Detects sparse shells using low visible text, root-mount containers such as `#root` / `#app`, app-bundle markers, and failed Markdown conversion.
-3. Bootstraps Playwright/Chromium once per crawl when rendering is first required.
+3. Bootstraps Playwright/Chromium once per crawl when rendering is first required, with runtime probing isolated in a subprocess before the main renderer starts.
 4. Reuses a Playwright Chromium browser/context across the crawl.
 5. Navigates with `page.goto(...)`, waits for `domcontentloaded`, then the configured `--render-wait-until` state, then an additional settle delay via `--render-wait-ms`.
 6. Optionally waits for `--render-selector` and optionally auto-scrolls via `--scroll` and related flags.
@@ -163,7 +167,7 @@ Each run also writes:
 
 Manifest records for HTML pages include provenance and diagnostics such as `render_mode`, `render_attempted`, `render_succeeded`, `render_warning`, `render_source`, `markdown_source`, `page_source_used`, `runtime_bootstrap_attempted`, `runtime_bootstrap_succeeded`, `runtime_bootstrap_warning`, `source_server_html_saved_to`, `source_rendered_html_saved_to`, `conversion_strategy`, `extraction_mode`, and `extraction_warning`.
 
-Summary records include `archived_html_pages`, `archived_binary_pages`, `warnings`, `errors`, `render_runtime_available`, `render_runtime_auto_installed`, `render_runtime_install_attempted`, `render_runtime_install_succeeded`, and `render_runtime_warning`.
+Summary records include `archived_html_pages`, `archived_binary_pages`, `warnings`, `errors`, `pages_render_attempted`, `pages_render_succeeded`, `pages_render_failed`, `pages_fell_back_to_server_html`, `pages_written_as_failure_stub`, `render_runtime_available`, `render_runtime_auto_installed`, `render_runtime_install_attempted`, `render_runtime_install_succeeded`, and `render_runtime_warning`.
 
 ## CLI options
 

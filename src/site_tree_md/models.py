@@ -76,6 +76,11 @@ class CrawlSummary:
     archived_binary_pages: int = 0
     warnings: int = 0
     errors: int = 0
+    pages_render_attempted: int = 0
+    pages_render_succeeded: int = 0
+    pages_render_failed: int = 0
+    pages_fell_back_to_server_html: int = 0
+    pages_written_as_failure_stub: int = 0
     render_runtime_required: bool = False
     render_runtime_available: bool = False
     render_runtime_auto_installed: bool = False

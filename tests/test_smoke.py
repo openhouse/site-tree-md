@@ -92,3 +92,11 @@ def test_crawler_smoke(tmp_path) -> None:
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_acceptance_script_is_repo_canonical() -> None:
+    script = Path("scripts/acceptance_render.sh")
+    text = script.read_text(encoding="utf-8")
+    assert "python -m pip install -e \"$repo_root\"" in text
+    assert "python -m site_tree_md \"https://smallbizunited.com/\"" in text
+    assert "feature/scaffold" not in text
