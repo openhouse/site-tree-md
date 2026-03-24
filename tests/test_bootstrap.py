@@ -33,6 +33,13 @@ class DummySyncApi:
         return types.SimpleNamespace(start=lambda: DummyPlaywrightRuntime())
 
 
+def test_probe_script_uses_valid_playwright_lifecycle() -> None:
+    code = bootstrap._playwright_probe_code()
+    assert "with sync_playwright().start()" not in code
+    assert "playwright = sync_playwright().start()" in code
+    assert "playwright.stop()" in code
+
+
 def test_missing_playwright_triggers_auto_install_once(monkeypatch) -> None:
     calls: list[list[str]] = []
     imported = {"installed": False}
@@ -65,7 +72,7 @@ def test_missing_playwright_triggers_auto_install_once(monkeypatch) -> None:
     assert status.install_attempted is True
     assert status.install_succeeded is True
     assert calls[0][:4] == [bootstrap.sys.executable, "-m", "pip", "install"]
-    assert calls[1] == [bootstrap.sys.executable, "-m", "playwright", "install", "chromium"]
+    assert calls[1][:2] == [bootstrap.sys.executable, "-c"]
     assert status_second is status
     assert len(calls) == 2
 
@@ -76,7 +83,7 @@ def test_missing_chromium_triggers_browser_install_once(monkeypatch) -> None:
 
     monkeypatch.setattr(bootstrap, "_import_playwright", lambda: (DummySyncApi, "1.52.0"))
 
-    def fake_probe(sync_api_module):  # noqa: ANN001
+    def fake_probe(*, verbose: bool):  # noqa: ANN001
         probe_calls["count"] += 1
         if probe_calls["count"] == 1:
             raise RuntimeError("Executable doesn't exist")
@@ -85,7 +92,7 @@ def test_missing_chromium_triggers_browser_install_once(monkeypatch) -> None:
         calls.append(command)
         return types.SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(bootstrap, "_probe_chromium", fake_probe)
+    monkeypatch.setattr(bootstrap, "_probe_chromium_subprocess", fake_probe)
     monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
 
     status = ensure_browser_runtime(verbose=False)
@@ -107,3 +114,24 @@ def test_bootstrap_failure_raises_clean_error(monkeypatch) -> None:
 
     with pytest.raises(BrowserRuntimeBootstrapError, match="playwright bootstrap failed"):
         ensure_browser_runtime(verbose=False)
+
+
+def test_non_browser_probe_failure_does_not_reinstall_chromium(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(bootstrap, "_import_playwright", lambda: (DummySyncApi, "1.52.0"))
+    monkeypatch.setattr(
+        bootstrap,
+        "_probe_chromium_subprocess",
+        lambda *, verbose: (_ for _ in ()).throw(RuntimeError("Sync API inside the asyncio loop")),
+    )
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        calls.append(command)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
+
+    with pytest.raises(BrowserRuntimeBootstrapError, match="Sync API inside the asyncio loop"):
+        ensure_browser_runtime(verbose=False)
+    assert calls == []

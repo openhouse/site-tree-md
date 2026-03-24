@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 
-from site_tree_md.bootstrap import ensure_browser_runtime
+from site_tree_md.bootstrap import BrowserRuntimeBootstrapError, ensure_browser_runtime
 
 
 @dataclass(slots=True)
@@ -54,12 +56,32 @@ class BrowserRenderer:
         ensure_browser_runtime(verbose=self.options.verbose)
         from playwright.sync_api import sync_playwright
 
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=not self.options.show_browser)
-        self._context = self._browser.new_context(
-            user_agent=self.options.user_agent,
-            ignore_https_errors=self.options.ignore_https_errors,
-        )
+        launch_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                self._playwright = sync_playwright().start()
+                self._browser = self._playwright.chromium.launch(
+                    headless=not self.options.show_browser
+                )
+                self._context = self._browser.new_context(
+                    user_agent=self.options.user_agent,
+                    ignore_https_errors=self.options.ignore_https_errors,
+                )
+                return
+            except Exception as exc:  # pragma: no cover - deterministic via mocked tests
+                launch_error = exc
+                self.close()
+                if attempt == 0 and _looks_like_missing_browser(str(exc)):
+                    if self.options.verbose:
+                        print("Browser launch failed; installing Chromium and retrying once...")
+                    subprocess.run(
+                        [sys.executable, "-m", "playwright", "install", "chromium"],
+                        check=True,
+                    )
+                    continue
+                raise BrowserRuntimeBootstrapError(f"playwright bootstrap failed: {exc}") from exc
+        if launch_error is not None:  # pragma: no cover
+            raise BrowserRuntimeBootstrapError(f"playwright bootstrap failed: {launch_error}")
 
     def close(self) -> None:
         if self._context is not None:
@@ -130,3 +152,8 @@ class BrowserRenderer:
                 page.wait_for_timeout(self.options.scroll_pause_ms)
         page.evaluate("window.scrollTo(0, 0)")
         time.sleep(0)
+
+
+def _looks_like_missing_browser(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return "playwright install" in lowered or "executable doesn't exist" in lowered
