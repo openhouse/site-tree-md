@@ -66,8 +66,6 @@ def setup_function() -> None:
     reset_runtime_bootstrap_state()
 
 
-
-
 def mark_runtime_available(self, *, fatal_on_failure: bool):
     from site_tree_md.render import BrowserRenderer, RenderOptions
 
@@ -182,7 +180,7 @@ def test_render_failure_keeps_stub(monkeypatch, tmp_path) -> None:
         thread.join(timeout=2)
 
 
-def test_render_sidecars_and_rendered_link_discovery(monkeypatch, tmp_path) -> None:
+def test_rendered_link_discovery_success_pages_are_md_only(monkeypatch, tmp_path) -> None:
     server, thread = serve(FixtureHandler)
     try:
 
@@ -225,9 +223,13 @@ def test_render_sidecars_and_rendered_link_discovery(monkeypatch, tmp_path) -> N
         crawler.crawl()
         all_md = sorted((tmp_path / "web").rglob("*.md"))
         assert len(all_md) >= 2
-        sidecars = sorted(path.name for path in (tmp_path / "web").rglob("*.html"))
-        assert any(name.endswith(".source.server.html") for name in sidecars)
-        assert any(name.endswith(".source.rendered.html") for name in sidecars)
+        sidecars = sorted(path.name for path in (tmp_path / "web").rglob("*.source.*.html"))
+        assert sidecars == []
+        manifest_lines = (tmp_path / "web" / "_crawl_manifest.jsonl").read_text(encoding="utf-8")
+        records = [json.loads(line) for line in manifest_lines.splitlines()]
+        html_records = [record for record in records if record["page_kind"] == "html"]
+        assert all(record["source_server_html_saved_to"] is None for record in html_records)
+        assert all(record["source_rendered_html_saved_to"] is None for record in html_records)
         about_texts = [
             path.read_text(encoding="utf-8") for path in all_md if path.parent.name == "about"
         ]
@@ -248,3 +250,48 @@ def test_html_to_markdown_stub_includes_metadata() -> None:
     assert result.conversion_strategy == "failure_stub"
     assert "Meta description: Desc" in result.markdown
     assert "Canonical URL: https://example.com/page" in result.markdown
+
+
+def test_failure_stub_keeps_html_sidecars(monkeypatch, tmp_path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(SPA_SHELL, encoding="utf-8")
+    server, thread = serve(QuietHandler, site)
+    try:
+        monkeypatch.setattr("site_tree_md.render.BrowserRenderer.start", lambda self: None)
+        monkeypatch.setattr(SiteCrawler, "_ensure_renderer_ready", mark_runtime_available)
+
+        def fake_render(self, url):
+            return RenderResult(
+                requested_url=url,
+                final_url=url,
+                html="<html><body><div id='root'></div></body></html>",
+                title="Fixture SPA",
+                status_code=200,
+                content_type="text/html",
+                render_succeeded=True,
+            )
+
+        monkeypatch.setattr("site_tree_md.render.BrowserRenderer.render_page", fake_render)
+        crawler = SiteCrawler(
+            f"http://127.0.0.1:{server.server_port}/",
+            tmp_path,
+            no_sitemaps=True,
+            ignore_robots=True,
+            render_mode="auto",
+            save_source_html=True,
+            save_rendered_html=True,
+        )
+        crawler.crawl()
+        sidecars = sorted(path.name for path in (tmp_path / "web").rglob("*.source.*.html"))
+        assert any(name.endswith(".source.server.html") for name in sidecars)
+        assert any(name.endswith(".source.rendered.html") for name in sidecars)
+        record = json.loads(
+            (tmp_path / "web" / "_crawl_manifest.jsonl").read_text().splitlines()[0]
+        )
+        assert record["conversion_strategy"] == "failure_stub"
+        assert record["source_server_html_saved_to"] is not None
+        assert record["source_rendered_html_saved_to"] is not None
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

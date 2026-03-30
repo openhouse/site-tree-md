@@ -88,7 +88,7 @@ def test_crawler_smoke(tmp_path) -> None:
         html_records = [record for record in records if record["page_kind"] == "html"]
         assert all(record["conversion_strategy"] for record in html_records)
         assert all(record["extraction_mode"] == "full-page" for record in html_records)
-        assert any(record["source_html_saved_to"] for record in html_records)
+        assert all(record["source_html_saved_to"] is None for record in html_records)
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -97,6 +97,28 @@ def test_crawler_smoke(tmp_path) -> None:
 def test_acceptance_script_is_repo_canonical() -> None:
     script = Path("scripts/acceptance_render.sh")
     text = script.read_text(encoding="utf-8")
-    assert "python -m pip install -e \"$repo_root\"" in text
-    assert "python -m site_tree_md \"https://smallbizunited.com/\"" in text
+    assert 'python -m pip install -e "$repo_root"' in text
+    assert 'python -m site_tree_md "https://smallbizunited.com/"' in text
     assert "feature/scaffold" not in text
+
+
+def test_direct_non_html_download_is_saved_raw(tmp_path) -> None:
+    root = tmp_path / "site"
+    root.mkdir()
+    (root / "feed.json").write_text('{"status":"ok","items":[1,2,3]}', encoding="utf-8")
+    server, thread = serve(root)
+    try:
+        crawler = SiteCrawler(
+            f"http://127.0.0.1:{server.server_port}/feed.json",
+            tmp_path,
+            ignore_robots=True,
+            no_sitemaps=True,
+            max_pages=1,
+        )
+        crawler.crawl()
+        raw_capture = next((tmp_path / "web").rglob("feed.json/feed.json"))
+        assert raw_capture.read_text(encoding="utf-8") == '{"status":"ok","items":[1,2,3]}'
+        assert list((tmp_path / "web").rglob("*.md")) == []
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)

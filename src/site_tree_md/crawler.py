@@ -480,7 +480,9 @@ class SiteCrawler:
         if kind == "html":
             server_html = response.text
             server_conversion = html_to_markdown(server_html, final_url, mode=self.page_mode)
-            render_attempted, render_reason = self._should_attempt_render(server_html, server_conversion)
+            render_attempted, render_reason = self._should_attempt_render(
+                server_html, server_conversion
+            )
             render_result: RenderResult | None = None
             runtime_status = RuntimeBootstrapStatus(available=False)
             if render_attempted:
@@ -507,7 +509,9 @@ class SiteCrawler:
                     server_html,
                     server_conversion,
                     render_result,
-                    render_result.final_url if render_result and render_result.final_url else final_url,
+                    render_result.final_url
+                    if render_result and render_result.final_url
+                    else final_url,
                 )
             )
             path = markdown_path(self.output_dir, final_url)
@@ -544,14 +548,22 @@ class SiteCrawler:
                     self.render_counts["fell_back_to_server_html"] += 1
             if conversion.conversion_strategy == "failure_stub":
                 self.render_counts["failure_stub"] += 1
-            if self.save_source_html or conversion.extraction_warning or render_attempted:
+            html_markdown_succeeded = (
+                conversion.conversion_strategy != "failure_stub"
+                and not conversion.extraction_warning
+            )
+            keep_html_sidecars = not html_markdown_succeeded
+            if keep_html_sidecars and (
+                self.save_source_html or conversion.extraction_warning or render_attempted
+            ):
                 save_result.server_html_path = self._save_html(
                     source_server_html_path(self.output_dir, final_url),
                     server_html,
                 )
                 save_result.source_html_path = save_result.server_html_path
             if (
-                render_result
+                keep_html_sidecars
+                and render_result
                 and render_result.render_succeeded
                 and render_result.html
                 and (
