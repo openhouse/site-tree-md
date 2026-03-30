@@ -10,6 +10,4 @@ python -m site_tree_md "https://smallbizunited.com/" \
   --max-pages 200 \
   --delay 0.5 \
   --verbose \
-  --render-mode auto \
-  --save-source-html \
-  --save-rendered-html
+  --render-mode auto

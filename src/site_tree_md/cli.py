@@ -60,12 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--save-source-html",
         action="store_true",
-        help="Save fetched server HTML alongside markdown for every HTML page.",
+        help="Keep fetched server HTML sidecars for degraded HTML->Markdown outcomes only.",
     )
     parser.add_argument(
         "--save-rendered-html",
         action="store_true",
-        help="Save rendered DOM HTML alongside markdown whenever browser rendering succeeds.",
+        help="Keep rendered DOM sidecars for degraded HTML->Markdown outcomes only.",
     )
     return parser
 
